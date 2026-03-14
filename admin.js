@@ -848,23 +848,37 @@ async function handleAddStudent(e) {
 
   try {
     // Step 1: Buat auth user via supabaseStudentClient (session terpisah)
-    // agar session admin yang aktif di supabaseClient TIDAK tertimpa.
     const { data: signUpData, error: signUpErr } = await supabaseStudentClient.auth.signUp({ email, password });
+
     if (signUpErr) {
       const msg = signUpErr.message.toLowerCase();
-      if (msg.includes('already registered') || msg.includes('user already registered')) {
-        throw new Error('Email ini sudah terdaftar. Gunakan email lain.');
+
+      // Rate limit — terlalu banyak percobaan email yang sama
+      if (msg.includes('rate limit') || msg.includes('over_email_send_rate_limit') || msg.includes('too many')) {
+        showRateLimitWarning(email);
+        btn.disabled = false; btn.textContent = '&#10003; Daftarkan Siswa';
+        return;
+      }
+      // Email sudah terdaftar
+      if (msg.includes('already registered') || msg.includes('already in use')) {
+        throw new Error('Email \u201c' + email + '\u201d sudah terdaftar. Gunakan email lain atau cari siswa ini di tabel.');
       }
       throw signUpErr;
     }
-    if (!signUpData.user) throw new Error('Gagal membuat akun siswa. Coba lagi.');
+
+    // signUp berhasil tapi user null = email confirmation masih aktif di Supabase
+    if (!signUpData.user) {
+      showEmailConfirmWarning(email);
+      btn.disabled = false; btn.textContent = '&#10003; Daftarkan Siswa';
+      return;
+    }
+
     const studentId = signUpData.user.id;
 
-    // Step 2: Langsung sign out client kedua (bersih-bersih)
+    // Step 2: Sign out client kedua segera
     await supabaseStudentClient.auth.signOut();
 
-    // Step 3: Insert profile via supabaseClient (session admin)
-    // Policy "admin insert any profile" memperbolehkan ini
+    // Step 3: Insert profile via session admin
     const { error: insertErr } = await supabaseClient.from('profiles').insert({
       id:             studentId,
       full_name:      name,
@@ -907,12 +921,97 @@ async function handleAddStudent(e) {
     btn.disabled = false; btn.textContent = '&#10003; Daftarkan Siswa';
   }
 }
-
 function copyCredentials(text) {
   navigator.clipboard.writeText(text)
     .then(() => toast('Info login disalin!', 'success'))
     .catch(() => toast('Gagal menyalin.', 'error'));
 }
+// ── Warning helpers untuk error pendaftaran ───────────────
+
+function showRateLimitWarning(email) {
+  const form = document.getElementById('addStudentForm');
+  // Hapus banner lama kalau ada
+  document.getElementById('rateLimitBanner')?.remove();
+
+  const banner = document.createElement('div');
+  banner.id = 'rateLimitBanner';
+  banner.style.cssText = `
+    background: rgba(255,184,48,.08);
+    border: 1px solid rgba(255,184,48,.35);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-bottom: 16px;
+    font-size: .875rem;
+    line-height: 1.65;
+    color: var(--gold);
+  `;
+  banner.innerHTML = `
+    <div style="font-family:var(--ff-display);font-weight:800;font-size:.95rem;margin-bottom:8px">
+      ⚠️ Email Rate Limit Supabase
+    </div>
+    <div style="color:var(--txt-1);margin-bottom:12px">
+      Terlalu banyak percobaan pendaftaran untuk email <strong>${email}</strong>.
+      Supabase memblokir pengiriman email sementara (~1 jam).
+    </div>
+    <div style="font-family:var(--ff-display);font-weight:700;color:var(--teal);margin-bottom:6px">
+      ✓ Solusi Permanen (1 menit):
+    </div>
+    <ol style="margin-left:18px;color:var(--txt-1);display:flex;flex-direction:column;gap:4px">
+      <li>Buka <strong>Supabase Dashboard</strong></li>
+      <li>Klik <strong>Authentication → Providers → Email</strong></li>
+      <li>Toggle <strong>OFF</strong> opsi <em>"Confirm email"</em></li>
+      <li>Klik <strong>Save</strong></li>
+      <li>Kembali ke sini dan coba lagi dengan email baru</li>
+    </ol>
+    <div style="margin-top:10px;padding:10px 12px;background:rgba(255,255,255,.04);border-radius:8px;font-size:.8rem;color:var(--txt-2)">
+      💡 Setelah dimatikan, pendaftaran tidak akan kirim email sama sekali — tidak ada lagi rate limit.
+    </div>
+  `;
+  form.insertBefore(banner, form.firstChild);
+  banner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  // Toast juga
+  toast('Rate limit! Matikan "Confirm email" di Supabase Auth Settings.', 'error', 6000);
+}
+
+function showEmailConfirmWarning(email) {
+  const form = document.getElementById('addStudentForm');
+  document.getElementById('rateLimitBanner')?.remove();
+
+  const banner = document.createElement('div');
+  banner.id = 'rateLimitBanner';
+  banner.style.cssText = `
+    background: rgba(47,111,237,.08);
+    border: 1px solid rgba(47,111,237,.3);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-bottom: 16px;
+    font-size: .875rem;
+    line-height: 1.65;
+  `;
+  banner.innerHTML = `
+    <div style="font-family:var(--ff-display);font-weight:800;font-size:.95rem;margin-bottom:8px;color:var(--blue-light)">
+      📧 Email Confirmation Masih Aktif
+    </div>
+    <div style="color:var(--txt-1);margin-bottom:12px">
+      Akun untuk <strong>${email}</strong> sudah dibuat di Supabase Auth,
+      tapi menunggu konfirmasi email. Siswa tidak bisa login sampai link diklik.
+    </div>
+    <div style="font-family:var(--ff-display);font-weight:700;color:var(--teal);margin-bottom:6px">
+      ✓ Cara Fix:
+    </div>
+    <ol style="margin-left:18px;color:var(--txt-1);display:flex;flex-direction:column;gap:4px">
+      <li>Buka <strong>Supabase → Authentication → Providers → Email</strong></li>
+      <li>Toggle <strong>OFF</strong> opsi <em>"Confirm email"</em> → Save</li>
+      <li>Hapus user <strong>${email}</strong> di <strong>Authentication → Users</strong></li>
+      <li>Kembali ke sini dan daftarkan ulang</li>
+    </ol>
+  `;
+  form.insertBefore(banner, form.firstChild);
+  banner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  toast('Aktifkan dulu: matikan Confirm Email di Supabase.', 'info', 6000);
+}
+
 
 // ─────────────────────────────────────────────────────────
 //  INIT
