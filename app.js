@@ -239,7 +239,7 @@ function renderLanding(container) {
           </div>
           <div class="school-card fade-in">
             <div class="school-emoji">🎓</div>
-            <div class="school-name">SMA</div>
+            <div class="school-name">SMA/SMK</div>
             <div class="school-desc">Kelas 10–12. Raih PTN impian dengan bimbingan intensif.</div>
           </div>
         </div>
