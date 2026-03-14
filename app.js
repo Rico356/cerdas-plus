@@ -88,24 +88,66 @@ async function doLogin(email, password) {
 }
 
 async function doRegister(formData) {
-  const { data, error } = await supabaseClient.auth.signUp({
-    email: formData.email,
-    password: formData.password,
-  });
-  if (error) throw error;
-  state.user = data.user;
+  // Sanitize password — pastikan string bersih (handle Google autofill edge case)
+  const cleanPassword = String(formData.password).trim();
 
-  // Insert profile
-  const { error: pErr } = await supabaseClient.from('profiles').insert({
-    id:           data.user.id,
-    full_name:    formData.full_name,
-    phone:        formData.phone,
-    school_level: formData.school_level,
-    grade:        formData.grade,
-    package_type: formData.package_type,
-    payment_status: 'pending',
+  const { data, error } = await supabaseClient.auth.signUp({
+    email:    formData.email.trim().toLowerCase(),
+    password: cleanPassword,
+    options: {
+      // Jika email confirmation dimatikan di Supabase dashboard,
+      // user langsung aktif. Jika tidak, user perlu cek email dulu.
+      emailRedirectTo: window.location.origin,
+    },
   });
-  if (pErr) throw pErr;
+
+  // ── Handle berbagai error Supabase ────────────────────────
+  if (error) {
+    const msg = error.message.toLowerCase();
+    if (msg.includes('rate limit') || msg.includes('email rate limit') || msg.includes('over_email_send_rate_limit')) {
+      throw new Error('Terlalu banyak percobaan pendaftaran. Tunggu 1 jam atau hubungi admin untuk didaftarkan langsung.');
+    }
+    if (msg.includes('already registered') || msg.includes('user already registered')) {
+      throw new Error('Email ini sudah terdaftar. Silakan login.');
+    }
+    if (msg.includes('password') && msg.includes('weak')) {
+      throw new Error('Password terlalu lemah. Gunakan minimal 8 karakter dengan kombinasi huruf, angka, dan simbol.');
+    }
+    throw error;
+  }
+
+  // ── Cek apakah email confirmation diperlukan ──────────────
+  // Jika identities kosong → email sudah terdaftar tapi belum konfirmasi
+  if (data.user && data.user.identities && data.user.identities.length === 0) {
+    throw new Error('Email ini sudah terdaftar tapi belum dikonfirmasi. Cek inbox emailmu atau hubungi admin.');
+  }
+
+  // Jika session null → email confirmation diperlukan (belum diklik link)
+  if (!data.session && data.user) {
+    // Tandai bahwa user perlu konfirmasi email — masih bisa insert profile
+    // karena user.id sudah ada
+    state.user = data.user;
+    state.needsEmailConfirmation = true;
+  } else {
+    state.user = data.user;
+    state.needsEmailConfirmation = false;
+  }
+
+  // ── Insert profile ─────────────────────────────────────────
+  if (data.user) {
+    const { error: pErr } = await supabaseClient.from('profiles').insert({
+      id:             data.user.id,
+      full_name:      formData.full_name,
+      phone:          formData.phone,
+      school_level:   formData.school_level,
+      grade:          formData.grade,
+      package_type:   formData.package_type,
+      payment_status: 'pending',
+    });
+    // Abaikan error duplicate (kalau user coba register ulang)
+    if (pErr && !pErr.message.includes('duplicate')) throw pErr;
+  }
+
   await loadProfile();
 }
 
@@ -118,18 +160,39 @@ async function doLogout() {
 
 async function loadProfile() {
   if (!state.user) return;
-  const { data } = await supabaseClient.from('profiles').select('*').eq('id', state.user.id).single();
-  state.profile = data;
+  // maybeSingle() → tidak throw error jika row belum ada (berbeda dengan single())
+  const { data, error } = await supabaseClient
+    .from('profiles')
+    .select('*')
+    .eq('id', state.user.id)
+    .maybeSingle();
+  if (error) console.warn('loadProfile error:', error.message);
+  state.profile = data ?? null;
 }
 
 async function submitPayment(amount) {
+  if (!state.user) throw new Error('Sesi habis. Silakan login ulang.');
+
   const { error } = await supabaseClient.from('profiles').update({
     payment_amount: amount,
     payment_status: 'pending',
   }).eq('id', state.user.id);
+
   if (error) throw error;
-  state.profile.payment_amount = amount;
-  state.profile.payment_status = 'pending';
+
+  // Jika state.profile masih null (profile belum ter-load), muat ulang dulu
+  if (!state.profile) {
+    await loadProfile();
+  }
+
+  // Update local state — gunakan Object.assign agar aman walau profile baru saja dimuat
+  if (state.profile) {
+    state.profile.payment_amount = amount;
+    state.profile.payment_status = 'pending';
+  } else {
+    // Fallback: buat objek lokal agar navigate('waiting') bisa render dengan benar
+    state.profile = { payment_amount: amount, payment_status: 'pending' };
+  }
 }
 
 async function updateProfile(fields) {
@@ -575,10 +638,17 @@ async function handleRegister(e) {
       package_type: pkg,
       password:     pwd,
     });
-    toast('Pendaftaran berhasil! Silakan lanjut ke pembayaran.', 'success');
-    navigate('payment');
+
+    if (state.needsEmailConfirmation) {
+      toast('Cek emailmu untuk konfirmasi akun, lalu kembali ke sini untuk login.', 'info', 7000);
+      navigate('login');
+    } else {
+      toast('Pendaftaran berhasil! Silakan lanjut ke pembayaran.', 'success');
+      navigate('payment');
+    }
   } catch (err) {
-    toast(err.message || 'Pendaftaran gagal. Coba lagi.', 'error');
+    const errMsg = err.message || 'Pendaftaran gagal. Coba lagi.';
+    toast(errMsg, 'error', 6000);
     btn.disabled = false; btn.textContent = 'Daftar Sekarang';
   }
 }
