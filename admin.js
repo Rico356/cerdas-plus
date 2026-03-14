@@ -4,18 +4,19 @@
 
 // ── State ──────────────────────────────────────────────────
 const adminState = {
-  admin:       null,   // Supabase user object
-  view:        'login', // login | dashboard
-  dashTab:     'payments',
-  filter:      'all',   // all | pending | verified | rejected
-  search:      '',
-  payments:    [],      // semua data profile
-  stats:       { total:0, pending:0, verified:0, rejected:0 },
-  loading:     false,
-  sidebarOpen: false,
-  drawerOpen:  false,
-  drawerUser:  null,
-  modalAction: null,    // fungsi yang dijalankan saat confirm modal
+  admin:          null,
+  view:           'login',
+  dashTab:        'payments',
+  filter:         'all',
+  search:         '',
+  payments:       [],
+  stats:          { total:0, pending:0, verified:0, rejected:0 },
+  loading:        false,
+  sidebarOpen:    false,
+  drawerOpen:     false,
+  drawerUser:     null,
+  modalAction:    null,
+  addStudentOpen: false,
 };
 
 // ── Format ─────────────────────────────────────────────────
@@ -260,6 +261,10 @@ function renderDashboard(container) {
           <span>Semua Siswa</span>
           <span class="a-count blue">${adminState.stats.total}</span>
         </button>
+        <button class="admin-nav-link" onclick="openAddStudent()">
+          <span class="a-icon">➕</span>
+          <span>Daftar Siswa</span>
+        </button>
 
         <div class="admin-nav-label" style="margin-top:12px">Akun</div>
         <button class="admin-nav-link" onclick="adminLogout()">
@@ -296,6 +301,7 @@ function renderDashboard(container) {
           </div>
         </div>
         <div class="topbar-right">
+          <button class="btn btn-pink btn-sm" onclick="openAddStudent()">+ Daftar Siswa</button>
           <button class="btn btn-outline-blue btn-sm" onclick="loadPayments()">↻ Refresh</button>
         </div>
       </div>
@@ -310,6 +316,104 @@ function renderDashboard(container) {
     <div class="drawer-backdrop" id="drawerBackdrop" onclick="closeDrawer()"></div>
     <div class="detail-drawer" id="detailDrawer">
       <div id="drawerInner"></div>
+    </div>
+
+    <!-- Add Student Modal -->
+    <div class="modal-backdrop" id="addStudentModal" style="display:none">
+      <div class="modal-box" style="max-width:500px;text-align:left">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:22px">
+          <div>
+            <div style="font-family:var(--ff-display);font-size:1.15rem;font-weight:800;margin-bottom:3px">➕ Daftar Siswa Manual</div>
+            <div style="font-size:.825rem;color:var(--txt-2)">Admin mendaftarkan siswa — langsung terverifikasi</div>
+          </div>
+          <button class="drawer-close" onclick="closeAddStudent()">✕</button>
+        </div>
+        <form id="addStudentForm" onsubmit="handleAddStudent(event)" style="display:flex;flex-direction:column;gap:14px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="form-group" style="grid-column:1/-1">
+              <label class="form-label">Nama Lengkap Siswa</label>
+              <input class="form-input" id="as_name" type="text" placeholder="Nama lengkap" required />
+            </div>
+            <div class="form-group" style="grid-column:1/-1">
+              <label class="form-label">Email</label>
+              <input class="form-input" id="as_email" type="email" placeholder="email@contoh.com" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label">No. WhatsApp</label>
+              <input class="form-input" id="as_phone" type="tel" placeholder="08xxxxxxxxxx" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Password Sementara</label>
+              <div style="position:relative">
+                <input class="form-input" id="as_pwd" type="text" placeholder="Min. 8 karakter" required minlength="8"
+                  style="padding-right:80px" value="${generateTempPwd()}" />
+                <button type="button" onclick="document.getElementById('as_pwd').value=generateTempPwd()"
+                  style="position:absolute;right:8px;top:50%;transform:translateY(-50%);padding:4px 8px;background:var(--bg-4);border:1px solid var(--border-1);border-radius:6px;font-size:.7rem;font-weight:700;color:var(--txt-1);cursor:pointer;font-family:var(--ff-display)">
+                  ↺ Acak
+                </button>
+              </div>
+              <div class="form-hint">Password ini dibagikan ke siswa untuk login pertama kali</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Jenjang</label>
+              <select class="form-select" id="as_level" required onchange="updateAddGrade()">
+                <option value="">Pilih</option>
+                <option value="SD">SD</option>
+                <option value="SMP">SMP</option>
+                <option value="SMA">SMA</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Kelas</label>
+              <select class="form-select" id="as_grade" required>
+                <option value="">Pilih kelas</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Paket</label>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div class="pkg-option selected-blue" id="asPkgMonthly" onclick="selectAddPkg('monthly')">
+                <div class="opt-name">📚 Bulanan</div>
+                <div class="opt-price">Rp 1.100.000/bln</div>
+              </div>
+              <div class="pkg-option" id="asPkgAnnual" onclick="selectAddPkg('annual')">
+                <div class="opt-name">⭐ Tahunan</div>
+                <div class="opt-price">Rp 17.000.000/thn</div>
+              </div>
+            </div>
+            <input type="hidden" id="as_pkg" value="monthly" />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Nominal Pembayaran (Rp)</label>
+            <input class="form-input" id="as_amount" type="number" value="1100000" required
+              style="font-family:var(--ff-display);font-weight:700" />
+            <div class="form-hint">Otomatis terisi sesuai paket — ubah jika ada diskon/custom</div>
+          </div>
+
+          <div style="padding:12px 14px;background:rgba(0,212,180,.07);border:1px solid rgba(0,212,180,.2);border-radius:var(--r-md);font-size:.8125rem;color:var(--teal)">
+            ✓ Status pembayaran akan langsung disetel <strong>Terverifikasi</strong> — siswa langsung bisa akses dashboard
+          </div>
+
+          <div style="display:flex;gap:10px;margin-top:4px">
+            <button type="submit" class="btn btn-blue" id="addStudentBtn" style="flex:1">
+              ✓ Daftarkan Siswa
+            </button>
+            <button type="button" class="btn btn-ghost" onclick="closeAddStudent()">Batal</button>
+          </div>
+        </form>
+
+        <!-- Success state (muncul setelah berhasil) -->
+        <div id="addStudentSuccess" style="display:none;text-align:center;padding:16px 0">
+          <div style="font-size:2.5rem;margin-bottom:14px">🎉</div>
+          <div style="font-family:var(--ff-display);font-size:1.1rem;font-weight:800;margin-bottom:8px">Siswa Berhasil Didaftarkan!</div>
+          <div style="color:var(--txt-1);font-size:.9rem;margin-bottom:20px">Bagikan info login ini ke siswa:</div>
+          <div id="studentCredentials" style="background:var(--bg-3);border:1px solid var(--border-0);border-radius:var(--r-lg);padding:18px;text-align:left;margin-bottom:20px"></div>
+          <button class="btn btn-blue btn-full" onclick="closeAddStudent();loadPayments()">Selesai</button>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -664,6 +768,150 @@ function handleSearch(val) {
   adminState.search = val;
   clearTimeout(searchTimer);
   searchTimer = setTimeout(renderDashContent, 180);
+}
+
+// ---------------------------------------------------------
+//  ADD STUDENT (Daftar Siswa Manual oleh Admin)
+// ---------------------------------------------------------
+
+function generateTempPwd() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#';
+  return Array.from({length: 10}, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+}
+
+function openAddStudent() {
+  adminState.addStudentOpen = true;
+  adminState.sidebarOpen    = false;
+  const modal = document.getElementById('addStudentModal');
+  if (modal) {
+    modal.style.display = 'flex';
+    document.getElementById('addStudentForm').style.display    = '';
+    document.getElementById('addStudentSuccess').style.display = 'none';
+    document.getElementById('addStudentForm').reset();
+    document.getElementById('as_pwd').value    = generateTempPwd();
+    document.getElementById('as_pkg').value    = 'monthly';
+    document.getElementById('as_amount').value = '1100000';
+    document.getElementById('asPkgMonthly').className = 'pkg-option selected-blue';
+    document.getElementById('asPkgAnnual').className  = 'pkg-option';
+    const overlay = document.getElementById('adminOverlay');
+    if (overlay) overlay.classList.remove('show');
+    const sidebar = document.getElementById('adminSidebar');
+    if (sidebar) sidebar.classList.add('closed');
+  } else {
+    render();
+    setTimeout(openAddStudent, 100);
+  }
+}
+
+function closeAddStudent() {
+  const modal = document.getElementById('addStudentModal');
+  if (modal) modal.style.display = 'none';
+  adminState.addStudentOpen = false;
+}
+
+function selectAddPkg(pkg) {
+  document.getElementById('as_pkg').value = pkg;
+  document.getElementById('asPkgMonthly').className = 'pkg-option' + (pkg === 'monthly' ? ' selected-blue' : '');
+  document.getElementById('asPkgAnnual').className  = 'pkg-option' + (pkg === 'annual'  ? ' selected-pink' : '');
+  document.getElementById('as_amount').value = pkg === 'annual' ? '17000000' : '1100000';
+}
+
+function updateAddGrade() {
+  const level = document.getElementById('as_level').value;
+  const el    = document.getElementById('as_grade');
+  const maps  = {
+    SD:  ['Kelas 1','Kelas 2','Kelas 3','Kelas 4','Kelas 5','Kelas 6'],
+    SMP: ['Kelas 7','Kelas 8','Kelas 9'],
+    SMA: ['Kelas 10','Kelas 11','Kelas 12'],
+  };
+  el.innerHTML = '<option value="">Pilih kelas</option>';
+  (maps[level] || []).forEach(g => {
+    const o = document.createElement('option');
+    o.value = g; o.textContent = g;
+    el.appendChild(o);
+  });
+}
+
+async function handleAddStudent(e) {
+  e.preventDefault();
+  const btn      = document.getElementById('addStudentBtn');
+  btn.disabled   = true; btn.textContent = 'Mendaftarkan...';
+
+  const email    = document.getElementById('as_email').value.trim().toLowerCase();
+  const password = document.getElementById('as_pwd').value.trim();
+  const name     = document.getElementById('as_name').value.trim();
+  const phone    = document.getElementById('as_phone').value.trim();
+  const level    = document.getElementById('as_level').value;
+  const grade    = document.getElementById('as_grade').value;
+  const pkg      = document.getElementById('as_pkg').value;
+  const amount   = parseInt(document.getElementById('as_amount').value, 10);
+
+  try {
+    // Step 1: Buat auth user via supabaseStudentClient (session terpisah)
+    // agar session admin yang aktif di supabaseClient TIDAK tertimpa.
+    const { data: signUpData, error: signUpErr } = await supabaseStudentClient.auth.signUp({ email, password });
+    if (signUpErr) {
+      const msg = signUpErr.message.toLowerCase();
+      if (msg.includes('already registered') || msg.includes('user already registered')) {
+        throw new Error('Email ini sudah terdaftar. Gunakan email lain.');
+      }
+      throw signUpErr;
+    }
+    if (!signUpData.user) throw new Error('Gagal membuat akun siswa. Coba lagi.');
+    const studentId = signUpData.user.id;
+
+    // Step 2: Langsung sign out client kedua (bersih-bersih)
+    await supabaseStudentClient.auth.signOut();
+
+    // Step 3: Insert profile via supabaseClient (session admin)
+    // Policy "admin insert any profile" memperbolehkan ini
+    const { error: insertErr } = await supabaseClient.from('profiles').insert({
+      id:             studentId,
+      full_name:      name,
+      phone:          phone,
+      school_level:   level,
+      grade:          grade,
+      package_type:   pkg,
+      payment_amount: amount,
+      payment_status: 'verified',
+      registered_by:  'admin',
+    });
+    if (insertErr) throw insertErr;
+
+    // Step 4: Tampilkan info login ke admin
+    document.getElementById('addStudentForm').style.display    = 'none';
+    document.getElementById('addStudentSuccess').style.display = 'block';
+    const credHtml = [
+      { k: 'Nama',     v: name },
+      { k: 'Email',    v: email },
+      { k: 'Password', v: `<code style="background:var(--bg-4);padding:2px 8px;border-radius:6px;color:var(--blue-light)">${password}</code>` },
+      { k: 'Paket',    v: pkg === 'annual' ? '&#9733; Tahunan' : '&#128218; Bulanan' },
+      { k: 'Status',   v: '<span style="color:var(--teal);font-weight:700">&#10003; Terverifikasi</span>' },
+    ].map(r => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border-0)">
+        <span style="color:var(--txt-2)">${r.k}</span>
+        <span style="font-family:var(--ff-display);font-weight:700">${r.v}</span>
+      </div>
+    `).join('');
+    document.getElementById('studentCredentials').innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:0">${credHtml}</div>
+      <button onclick="copyCredentials('Email: ${email}\\nPassword: ${password}\\nPaket: ${pkg === 'annual' ? 'Tahunan' : 'Bulanan'}')"
+        class="btn btn-outline-blue btn-sm btn-full" style="margin-top:14px">
+        &#128203; Salin Info Login
+      </button>
+    `;
+    toast(`Siswa ${name} berhasil didaftarkan!`, 'success');
+
+  } catch (err) {
+    toast(err.message || 'Gagal mendaftarkan siswa.', 'error');
+    btn.disabled = false; btn.textContent = '&#10003; Daftarkan Siswa';
+  }
+}
+
+function copyCredentials(text) {
+  navigator.clipboard.writeText(text)
+    .then(() => toast('Info login disalin!', 'success'))
+    .catch(() => toast('Gagal menyalin.', 'error'));
 }
 
 // ─────────────────────────────────────────────────────────
